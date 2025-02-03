@@ -10,8 +10,7 @@
    [metabase.util :as u]
    [metabase.util.json :as json]
    [metabase.util.malli.schema :as ms]
-   [toucan2.core :as t2]
-   [toucan2.tools.with-temp :as t2.with-temp]))
+   [toucan2.core :as t2]))
 
 (set! *warn-on-reflection* true)
 
@@ -260,7 +259,7 @@
                              (:cause
                               (mt/user-http-request :crowberto :post 400 "action" initial-action))))))
                   (testing "a plain card instead of a model"
-                    (t2.with-temp/with-temp [:model/Card {plain-card-id :id} {:dataset_query (mt/mbql-query users)}]
+                    (mt/with-temp [:model/Card {plain-card-id :id} {:dataset_query (mt/mbql-query users)}]
                       (is (= "Actions must be made with models, not cards."
                              (mt/user-http-request :crowberto :post 400 "action" (assoc initial-action :model_id plain-card-id)))))))
                 (let [created-action (mt/user-http-request :crowberto :post 200 "action" initial-action)
@@ -312,8 +311,8 @@
 (deftest implicit-actions-on-non-raw-model-test
   (testing "Implicit actions are not supported on models that have clauses (aggregation, sort, breakout, ...)"
     (mt/with-actions-enabled
-      (t2.with-temp/with-temp [:model/Card {model-id :id} {:dataset_query (mt/mbql-query users {:aggregation [[:count]]})
-                                                           :type          :model}]
+      (mt/with-temp [:model/Card {model-id :id} {:dataset_query (mt/mbql-query users {:aggregation [[:count]]})
+                                                 :type          :model}]
         (is (= "Implicit actions are not supported for models with clauses."
                (mt/user-http-request :crowberto :post 400 "action"
                                      {:name       "Implicit example"
@@ -326,7 +325,7 @@
   (snowplow-test/with-fake-snowplow-collector
     (mt/with-actions-enabled
       (testing "Should send a snowplow event when"
-        (t2.with-temp/with-temp
+        (mt/with-temp
           [:model/Card {card-id :id} {:type :model :dataset_query (mt/mbql-query users)}]
           (doseq [{:keys [type parameters] :as action} (all-actions-default card-id)]
             (let [new-action (mt/user-http-request :crowberto :post 200 "action" action)]
@@ -376,31 +375,32 @@
             (is (false? (t2/select-one-fn :archived :model/Action :id action-id))))
           (testing "Validate POST"
             (testing "Required fields"
-              (is (partial= {:errors {:name "string"},
-                             :specific-errors {:name ["should be a string, received: nil"]}}
-                            (mt/user-http-request :crowberto :post 400 "action" {:type "http"})))
-              (is (partial= {:errors {:model_id "value must be an integer greater than zero."}
-                             :specific-errors {:model_id ["value must be an integer greater than zero., received: nil"]}}
-                            (mt/user-http-request :crowberto :post 400 "action" {:type "http" :name "test"}))))
+              (is (=? {:errors {:name "string"},
+                       :specific-errors {:name ["missing required key, received: nil"]}}
+                      (mt/user-http-request :crowberto :post 400 "action" {:type "http"})))
+              (is (=? {:errors {:model_id "value must be an integer greater than zero."}
+                       :specific-errors {:model_id ["missing required key, received: nil"]}}
+                      (mt/user-http-request :crowberto :post 400 "action" {:type "http" :name "test"}))))
             (testing "Handles need to be valid jq"
-              (is (partial= {:errors {:response_handle "nullable string, and must be a valid json-query, something like '.item.title'"}
-                             :specific-errors {:response_handle ["must be a valid json-query, something like '.item.title', received: \"body\""]}}
-                            (mt/user-http-request :crowberto :post 400 "action" (assoc initial-action :response_handle "body"))))
-              (is (partial= {:errors {:error_handle "nullable string, and must be a valid json-query, something like '.item.title'"}
-                             :specific-errors {:error_handle ["must be a valid json-query, something like '.item.title', received: \"x\""]}}
-                            (mt/user-http-request :crowberto :post 400 "action" (assoc initial-action :error_handle "x"))))))
+              (is (=? {:errors {:response_handle "nullable string, and must be a valid json-query, something like '.item.title'"}
+                       :specific-errors {:response_handle ["must be a valid json-query, something like '.item.title', received: \"body\""]}}
+                      (mt/user-http-request :crowberto :post 400 "action" (assoc initial-action :response_handle "body"))))
+              (is (=? {:errors {:error_handle "nullable string, and must be a valid json-query, something like '.item.title'"}
+                       :specific-errors {:error_handle ["must be a valid json-query, something like '.item.title', received: \"x\""]}}
+                      (mt/user-http-request :crowberto :post 400 "action" (assoc initial-action :error_handle "x"))))))
           (testing "Validate PUT"
             (testing "Template needs method and url"
-              (is (partial= {:errors {:action "map where {:archived (optional) -> <nullable boolean>, :database_id (optional) -> <nullable value must be an integer greater than zero.>, :dataset_query (optional) -> <nullable map>, :description (optional) -> <nullable string>, :error_handle (optional) -> <nullable string, and must be a valid json-query, something like '.item.title'>, :kind (optional) -> <nullable Unsupported implicit action kind>, :model_id (optional) -> <nullable value must be an integer greater than zero.>, :name (optional) -> <nullable string>, :parameter_mappings (optional) -> <nullable map>, :parameters (optional) -> <nullable sequence of map>, :response_handle (optional) -> <nullable string, and must be a valid json-query, something like '.item.title'>, :template (optional) -> <nullable map where {:method -> <enum of GET, POST, PUT, DELETE, PATCH>, :url -> <string with length >= 1>, :body (optional) -> <nullable string>, :headers (optional) -> <nullable string>, :parameters (optional) -> <nullable sequence of map>, :parameter_mappings (optional) -> <nullable map>} with no other keys>, :type (optional) -> <nullable Unsupported action type>, :visualization_settings (optional) -> <nullable map>}"},
-                             :specific-errors {:action {:template {:method ["missing required key, received: nil"] :url ["missing required key, received: nil"]}}}}
-                            (mt/user-http-request :crowberto :put 400 action-path {:type "http" :template {}}))))
+              (is (=? {:specific-errors
+                       {:template {:method ["missing required key, received: nil"], :url ["missing required key, received: nil"]}},
+                       :errors {:template "nullable map where {:method -> <enum of GET, POST, PUT, DELETE, PATCH>, :url -> <string with length >= 1>, :body (optional) -> <nullable string>, :headers (optional) -> <nullable string>, :parameters (optional) -> <nullable sequence of map>, :parameter_mappings (optional) -> <nullable map>} with no other keys"}}
+                      (mt/user-http-request :crowberto :put 400 action-path {:type "http" :template {}}))))
             (testing "Handles need to be valid jq"
-              (is (partial= {:errors {:action "map where {:archived (optional) -> <nullable boolean>, :database_id (optional) -> <nullable value must be an integer greater than zero.>, :dataset_query (optional) -> <nullable map>, :description (optional) -> <nullable string>, :error_handle (optional) -> <nullable string, and must be a valid json-query, something like '.item.title'>, :kind (optional) -> <nullable Unsupported implicit action kind>, :model_id (optional) -> <nullable value must be an integer greater than zero.>, :name (optional) -> <nullable string>, :parameter_mappings (optional) -> <nullable map>, :parameters (optional) -> <nullable sequence of map>, :response_handle (optional) -> <nullable string, and must be a valid json-query, something like '.item.title'>, :template (optional) -> <nullable map where {:method -> <enum of GET, POST, PUT, DELETE, PATCH>, :url -> <string with length >= 1>, :body (optional) -> <nullable string>, :headers (optional) -> <nullable string>, :parameters (optional) -> <nullable sequence of map>, :parameter_mappings (optional) -> <nullable map>} with no other keys>, :type (optional) -> <nullable Unsupported action type>, :visualization_settings (optional) -> <nullable map>}"},
-                             :specific-errors {:action {:response_handle ["must be a valid json-query, something like '.item.title', received: \"body\""]}}}
-                            (mt/user-http-request :crowberto :put 400 action-path (assoc initial-action :response_handle "body"))))
-              (is (partial= {:errors {:action "map where {:archived (optional) -> <nullable boolean>, :database_id (optional) -> <nullable value must be an integer greater than zero.>, :dataset_query (optional) -> <nullable map>, :description (optional) -> <nullable string>, :error_handle (optional) -> <nullable string, and must be a valid json-query, something like '.item.title'>, :kind (optional) -> <nullable Unsupported implicit action kind>, :model_id (optional) -> <nullable value must be an integer greater than zero.>, :name (optional) -> <nullable string>, :parameter_mappings (optional) -> <nullable map>, :parameters (optional) -> <nullable sequence of map>, :response_handle (optional) -> <nullable string, and must be a valid json-query, something like '.item.title'>, :template (optional) -> <nullable map where {:method -> <enum of GET, POST, PUT, DELETE, PATCH>, :url -> <string with length >= 1>, :body (optional) -> <nullable string>, :headers (optional) -> <nullable string>, :parameters (optional) -> <nullable sequence of map>, :parameter_mappings (optional) -> <nullable map>} with no other keys>, :type (optional) -> <nullable Unsupported action type>, :visualization_settings (optional) -> <nullable map>}"},
-                             :specific-errors {:action {:error_handle ["must be a valid json-query, something like '.item.title', received: \"x\""]}}}
-                            (mt/user-http-request :crowberto :put 400 action-path (assoc initial-action :error_handle "x")))))))))))
+              (is (=? {:errors {:response_handle "nullable string, and must be a valid json-query, something like '.item.title'"},
+                       :specific-errors {:response_handle ["must be a valid json-query, something like '.item.title', received: \"body\""]}}
+                      (mt/user-http-request :crowberto :put 400 action-path (assoc initial-action :response_handle "body"))))
+              (is (=? {:errors {:error_handle "nullable string, and must be a valid json-query, something like '.item.title'"},
+                       :specific-errors {:error_handle ["must be a valid json-query, something like '.item.title', received: \"x\""]}}
+                      (mt/user-http-request :crowberto :put 400 action-path (assoc initial-action :error_handle "x")))))))))))
 
 ;;; +----------------------------------------------------------------------------------------------------------------+
 ;;; |                                            PUBLIC SHARING ENDPOINTS                                            |

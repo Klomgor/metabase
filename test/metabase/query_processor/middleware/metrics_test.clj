@@ -303,8 +303,9 @@
          (adjust query)))))
 
 (deftest ^:parallel adjust-mixed-multi-source-test
-  (let [[first-metric mp] (mock-metric lib.tu/metadata-provider-with-mock-cards
-                                       (-> (lib/query lib.tu/metadata-provider-with-mock-cards (:products lib.tu/mock-cards))
+  (let [mp                (lib.tu/metadata-provider-with-mock-cards)
+        [first-metric mp] (mock-metric mp
+                                       (-> (lib/query mp (:products (lib.tu/mock-cards)))
                                            (lib/aggregate (update (lib/avg (meta/field-metadata :products :rating)) 1 assoc :name (u/slugify "Mock metric")))
                                            (lib/filter (lib/> (meta/field-metadata :products :price) 1))))
         [second-metric mp] (mock-metric mp (-> (lib/query mp first-metric)
@@ -433,7 +434,7 @@
 (deftest ^:parallel metric-question-on-native-model-test
   (let [mp meta/metadata-provider
         sum-pred (comp #{"sum"} :name)
-        query lib.tu/native-query
+        query (lib.tu/native-query)
         question (model-based-metric-question mp query sum-pred)]
     (is (=? {:stages
              [{:lib/type :mbql.stage/native,
@@ -651,12 +652,13 @@
       (testing "inside :joins inside :source-query"
         (is (=? (lib.tu.macros/mbql-query nil
                   {:source-query {:source-table (meta/id :checkins)
-                                  :joins        [{:condition    [:= [:field 1 nil] 2]
+                                  :joins        [{:condition    [:= [:field (meta/id :checkins :venue-id) nil] 2]
                                                   :source-query after}]}})
                 (expand-macros (lib.tu.macros/mbql-query nil
                                  {:source-query {:source-table (meta/id :checkins)
-                                                 :joins        [{:condition    [:= [:field 1 nil] 2]
-                                                                 :source-query before}]}}))))))))
+                                                 :joins
+                                                 [{:condition    [:= [:field (meta/id :checkins :venue-id) nil] 2]
+                                                   :source-query before}]}}))))))))
 
 (deftest ^:parallel model-based-metric-use-test
   (let [model {:lib/type :metadata/card
@@ -818,7 +820,7 @@
         (is (= 2162
                (ffirst (mt/rows (qp/process-query query)))))))))
 
-(deftest ^:parallel ^:mb/once fetch-referenced-metrics-test
+(deftest ^:parallel fetch-referenced-metrics-test
   (testing "Metric's aggregation `:name` is used in expanded aggregation (#48625)"
     (let [mp (lib.metadata.jvm/application-database-metadata-provider (mt/id))
           metric-query (-> (lib/query mp (lib.metadata/table mp (mt/id :orders)))

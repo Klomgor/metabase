@@ -9,20 +9,20 @@
    [java-time.api :as t]
    [medley.core :as m]
    [metabase.analytics.snowplow :as snowplow]
+   [metabase.channel.email :as email]
    [metabase.config :as config]
    [metabase.db :as db]
    [metabase.db.query :as mdb.query]
    [metabase.driver :as driver]
    [metabase.eid-translation :as eid-translation]
-   [metabase.email :as email]
    [metabase.embed.settings :as embed.settings]
    [metabase.integrations.google :as google]
    [metabase.integrations.slack :as slack]
    [metabase.models.humanization :as humanization]
    [metabase.models.interface :as mi]
    [metabase.models.setting :as setting]
+   [metabase.premium-features.core :as premium-features :refer [defenterprise]]
    [metabase.public-settings :as public-settings]
-   [metabase.public-settings.premium-features :as premium-features :refer [defenterprise]]
    [metabase.util :as u]
    [metabase.util.honey-sql-2 :as h2x]
    [metabase.util.json :as json]
@@ -179,7 +179,8 @@
   "Get metrics based on questions
   TODO characterize by # executions and avg latency"
   []
-  (let [cards (t2/select [:model/Card :query_type :public_uuid :enable_embedding :embedding_params :dataset_query :dashboard_id]
+  (let [cards (t2/select [:model/Card :query_type :public_uuid :enable_embedding :embedding_params :dataset_query
+                          :dashboard_id :entity_id :created_at :collection_id :name]
                          {:where (mi/exclude-internal-content-hsql :model/Card)})]
     {:questions (merge-count-maps (for [card cards]
                                     (let [native? (= (keyword (:query_type card)) :native)

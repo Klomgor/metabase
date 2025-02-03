@@ -2,8 +2,8 @@
   (:require
    [java-time.api :as t]
    [metabase.models.interface :as mi]
-   [metabase.models.permissions :as perms]
-   [metabase.public-settings.premium-features :as premium-features]
+   [metabase.permissions.core :as perms]
+   [metabase.premium-features.core :as premium-features]
    [metabase.util :as u]
    [metabase.util.json :as json]
    [metabase.util.malli :as mu]

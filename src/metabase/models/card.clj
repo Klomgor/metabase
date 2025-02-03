@@ -14,6 +14,7 @@
    [metabase.db.query :as mdb.query]
    [metabase.events :as events]
    [metabase.legacy-mbql.normalize :as mbql.normalize]
+   [metabase.legacy-mbql.util :as mbql.u]
    [metabase.lib.core :as lib]
    [metabase.lib.metadata.jvm :as lib.metadata.jvm]
    [metabase.lib.metadata.protocols :as lib.metadata.protocols]
@@ -22,22 +23,21 @@
    [metabase.models.audit-log :as audit-log]
    [metabase.models.card.metadata :as card.metadata]
    [metabase.models.collection :as collection]
-   [metabase.models.data-permissions :as data-perms]
    [metabase.models.field-values :as field-values]
    [metabase.models.interface :as mi]
    [metabase.models.moderation-review :as moderation-review]
    [metabase.models.parameter-card :as parameter-card]
    [metabase.models.params :as params]
-   [metabase.models.permissions :as perms]
    [metabase.models.pulse :as models.pulse]
    [metabase.models.query :as query]
    [metabase.models.query.permissions :as query-perms]
    [metabase.models.revision :as revision]
    [metabase.models.serialization :as serdes]
    [metabase.moderation :as moderation]
+   [metabase.permissions.core :as perms]
+   [metabase.premium-features.core :refer [defenterprise]]
    [metabase.public-settings :as public-settings]
-   [metabase.public-settings.premium-features :refer [defenterprise]]
-   [metabase.query-analysis :as query-analysis]
+   [metabase.query-analysis.core :as query-analysis]
    [metabase.query-processor.util :as qp.util]
    [metabase.search.core :as search]
    [metabase.util :as u]
@@ -73,7 +73,7 @@
 (doto :model/Card
   (derive :metabase/model)
   ;; You can read/write a Card if you can read/write its parent Collection
-  (derive ::perms/use-parent-collection-perms)
+  (derive :perms/use-parent-collection-perms)
   (derive :hook/timestamped?)
   (derive :hook/entity-id))
 
@@ -137,32 +137,37 @@
   (mi/instances-with-hydrated-data
    cards k
    (fn []
-     (update-vals
-      (group-by :card_id
-                (t2/query {:select [:card_id
-                                    :name
-                                    :collection_id
-                                    :id]
-                           :from [[{:union-all [{:select [[:dc.card_id :card_id]
-                                                          [:d.name :name]
-                                                          [:d.collection_id :collection_id]
-                                                          [:d.id :id]]
-                                                 :from [[:report_dashboardcard :dc]]
-                                                 :join [[:report_dashboard :d] [:= :dc.dashboard_id :d.id]]
-                                                 :where [:in :dc.card_id (map :id cards)]}
-                                                {:select [[:dcs.card_id :card_id]
-                                                          [:d.name :name]
-                                                          [:d.collection_id :collection_id]
-                                                          [:d.id :id]]
-                                                 :from [[:dashboardcard_series :dcs]]
-                                                 :join [[:report_dashboardcard :dc] [:= :dc.id :dcs.dashboardcard_id]
-                                                        [:report_dashboard :d] [:= :d.id :dc.dashboard_id]]
-                                                 :where [:in :dcs.card_id (map :id cards)]}]}
-                                   :dummy_alias]]}))
-      (fn [dashes] (->> dashes
-                        (map (fn [dash] (dissoc dash :card_id)))
-                        distinct
-                        (mapv (fn [dash] (t2/instance :model/Dashboard dash)))))))
+     (let [card-ids (map :id cards)
+           ;; First get dashboards from direct card connections
+           direct-dashboards (t2/query {:select [[:dc.card_id :card_id]
+                                                 :d.name
+                                                 :d.collection_id
+                                                 :d.description
+                                                 :d.id
+                                                 :d.archived]
+                                        :from [[:report_dashboardcard :dc]]
+                                        :join [[:report_dashboard :d] [:= :dc.dashboard_id :d.id]]
+                                        :where [:in :dc.card_id card-ids]})
+           ;; Then get dashboards from series
+           series-dashboards (t2/query {:select [[:dcs.card_id :card_id]
+                                                 :d.name
+                                                 :d.collection_id
+                                                 :d.description
+                                                 :d.id
+                                                 :d.archived]
+                                        :from [[:dashboardcard_series :dcs]]
+                                        :join [[:report_dashboardcard :dc] [:= :dc.id :dcs.dashboardcard_id]
+                                               [:report_dashboard :d] [:= :d.id :dc.dashboard_id]]
+                                        :where [:in :dcs.card_id card-ids]})
+           ;; Combine and group all results
+           all-dashboards (concat direct-dashboards series-dashboards)]
+       (update-vals
+        (group-by :card_id all-dashboards)
+        (fn [dashes]
+          (->> dashes
+               (map #(dissoc % :card_id))
+               distinct
+               (mapv #(t2/instance :model/Dashboard %)))))))
    :id
    {:default []}))
 
@@ -238,7 +243,7 @@
    (fn [card]
      (assoc card
             :can_manage_db
-            (data-perms/user-has-permission-for-database? api/*current-user-id* :perms/manage-database :yes (:database_id card))))
+            (perms/user-has-permission-for-database? api/*current-user-id* :perms/manage-database :yes (:database_id card))))
    cards))
 
 (methodical/defmethod t2/batched-hydrate [:model/Card :parameter_usage_count]
@@ -667,13 +672,90 @@
                                                   (lib/query (:dataset_query card))
                                                   lib/suggested-name))))
 
+(defn- derive-ident [prefix entity_id stage-number tail]
+  (let [entity_id (cond-> entity_id
+                    (instance? clojure.lang.IDeref entity_id) deref)]
+    (if (= entity_id ::before-insert)
+      ;; If this is a fresh insert, it's safe to generate them at random rather than deriving them!
+      (u/generate-nano-id)
+      ;; If entity_id is provided instead, then derive an opaque string based on that entity_id.
+      (str prefix "_" entity_id "@" stage-number "__" tail))))
+
+(defn- ensure-clause-idents-list [existing xs prefix stage-number {:keys [entity_id] :as _ctx}]
+  (into {} (map (fn [i]
+                  [i (or (get existing i)
+                         (derive-ident prefix entity_id stage-number i))]))
+        (range (count xs))))
+
+(defn- ensure-clause-idents-expressions [existing expressions stage-number {:keys [entity_id] :as _ctx}]
+  (m/map-kv-vals (fn [expr-name _expr-clause]
+                   (or (get existing expr-name)
+                       (derive-ident "expression" entity_id stage-number expr-name)))
+                 expressions))
+
+(defn- ensure-clause-idents-joins [joins stage-number {:keys [entity_id] :as _ctx}]
+  (mapv #(cond-> %
+           (not (:ident %)) (assoc :ident (derive-ident "join" entity_id stage-number (:alias %))))
+        joins))
+
+(defn- ensure-clause-idents-inner [inner-query ctx]
+  (mbql.u/map-stages
+   (fn [query stage-number]
+     (cond-> query
+       (:aggregation query) (update :aggregation-idents
+                                    ensure-clause-idents-list (:aggregation query) "aggregation" stage-number ctx)
+       (:expressions query) (update :expression-idents
+                                    ensure-clause-idents-expressions (:expressions query) stage-number ctx)
+       (:breakout query)    (update :breakout-idents
+                                    ensure-clause-idents-list (:breakout query) "breakout" stage-number ctx)
+       (:joins query)       (update :joins
+                                    ensure-clause-idents-joins stage-number ctx)))
+   inner-query))
+
+(defn- ensure-clause-idents-outer [{:keys [query type] :as outer-query} ctx]
+  (cond-> outer-query
+    (and (= type :query) query) (update :query ensure-clause-idents-inner ctx)))
+
+(defn- ensure-clause-idents
+  ([card]
+   (ensure-clause-idents card nil))
+  ([card forced-entity-id]
+   (let [hashed-eid (atom false)
+         entity-id  (or forced-entity-id
+                        (:entity_id card)
+                        (delay
+                          ;; When the card does not already have an `entity_id`, use serdes hashing to backfill it.
+                          ;; If the columns necessary for that serdes hashing were not selected, throw a specific error
+                          ;; which is caught and logged below.
+                          ;; NOTE: These columns must be kept in sync with the [[serdes/hash-fields]] for :model/Card.
+                          (when-not (every? #(contains? card %) [:collection_id :created_at :name])
+                            (throw (ex-info "Best-effort backfill of :entity_id on :model/Card failed"
+                                            {::best-effort-backfill true})))
+                          (reset! hashed-eid true)
+                          (serdes/backfill-entity-id card)))
+         ;; Calculate the new query. If we need to backfill its `:entity_id` but it fails, it will throw a specific
+         ;; exception that gets caught here, making query' nil. In that case the card is returned unchanged.
+         query'    (when (:dataset_query card)
+                     (try
+                       (ensure-clause-idents-outer (:dataset_query card) {:entity_id entity-id})
+                       (catch clojure.lang.ExceptionInfo e
+                         (when-not (::best-effort-backfill (ex-data e))
+                           (throw e))
+                         (log/warnf "Best-effort backfill of :entity_id failed for Card %d" (:id card))
+                         nil)))]
+     (cond-> card
+       query'      (assoc :dataset_query query')
+       ;; If we did have to generate the hashed entity_id, include it on the returned card as well.
+       @hashed-eid (assoc :entity_id @entity-id)))))
+
 (t2/define-after-select :model/Card
   [card]
   (-> card
       (dissoc :dataset_query_metrics_v2_migration_backup)
       (m/assoc-some :source_card_id (-> card :dataset_query source-card-id))
       public-settings/remove-public-uuid-if-public-sharing-is-disabled
-      add-query-description-to-metric-card))
+      add-query-description-to-metric-card
+      ensure-clause-idents))
 
 (t2/define-before-insert :model/Card
   [card]
@@ -682,7 +764,8 @@
       maybe-normalize-query
       card.metadata/populate-result-metadata
       pre-insert
-      populate-query-fields))
+      populate-query-fields
+      (ensure-clause-idents ::before-insert)))
 
 (t2/define-after-insert :model/Card
   [card]
@@ -731,6 +814,7 @@
   (t2/delete! 'ModerationReview :moderated_item_type "card", :moderated_item_id id)
   (t2/delete! 'Revision :model "Card", :model_id id))
 
+;; NOTE: The columns required for this hashing must be kept in sync with [[ensure-clause-idents]].
 (defmethod serdes/hash-fields :model/Card
   [_card]
   [:name (serdes/hydrated-hash :collection) :created_at])
@@ -1117,6 +1201,18 @@
       (events/publish-event! :event/card-update {:object card :user-id api/*current-user-id*}))
     card))
 
+(defn sole-dashboard-id
+  "Given a card, returns the dashboard_id of the *sole* dashboard it's in, or `nil` if it's not in exactly one dashboard."
+  [card]
+  (when-not (contains? card :in_dashboards)
+    (throw (ex-info "`automovable?` must be called with a card hydrated with `:in_dashboards`"
+                    {:card-id (:id card)})))
+  (let [[dashboard :as dashboards] (:in_dashboards card)]
+    (when (and (= 1 (count dashboards))
+               (not (:archived dashboard))
+               (not (:archived card)))
+      (:id dashboard))))
+
 (methodical/defmethod mi/to-json :model/Card
   [card json-generator]
   ;; we're doing update + dissoc instead of [[medley.core/dissoc-in]] because we don't want it to remove the
@@ -1234,12 +1330,13 @@
 (def ^:private base-search-spec
   {:model        :model/Card
    :attrs        {:archived            true
-                  :collection-id       :collection_id
+                  :collection-id       true
                   :creator-id          true
+                  :dashboard-id        true
                   :dashboardcard-count {:select [:%count.*]
                                         :from   [:report_dashboardcard]
                                         :where  [:= :report_dashboardcard.card_id :this.id]}
-                  :database-id         :database_id
+                  :database-id         true
                   :last-viewed-at      :last_used_at
                   :native-query        [:case [:= "native" :query_type] :dataset_query]
                   :official-collection [:= "official" :collection.authority_level]

@@ -1,4 +1,4 @@
-(ns ^:mb/once metabase-enterprise.serialization.v2.load-test
+(ns metabase-enterprise.serialization.v2.load-test
   (:require
    [clojure.string :as str]
    [clojure.test :refer :all]
@@ -225,14 +225,14 @@
             (reset! serialized (into [] (serdes.extract/extract {})))))
 
         (testing "the serialized form is as desired"
-          (is (= {:type  :query
-                  :query {:source-table ["my-db" nil "customers"]
-                          :filter       [:>= [:field ["my-db" nil "customers" "age"] nil] 18]
-                          :aggregation  [[:count]]}
-                  :database "my-db"}
-                 (->> (by-model @serialized "Card")
-                      first
-                      :dataset_query))))
+          (let [card (first (by-model @serialized "Card"))]
+            (is (=? {:type  :query
+                     :query {:source-table ["my-db" nil "customers"]
+                             :filter       [:>= [:field ["my-db" nil "customers" "age"] nil] 18]
+                             :aggregation  [[:count]]
+                             :aggregation-idents {0 string?}}
+                     :database "my-db"}
+                    (:dataset_query card)))))
 
         (testing "deserializing adjusts the IDs properly"
           (ts/with-db dest-db
@@ -259,12 +259,13 @@
             (is (not= (:dataset_query @card1s)
                       (:dataset_query @card1d)))
             (testing "the Card's query is based on the new Database, Table, and Field IDs"
-              (is (= {:type     :query
-                      :query    {:source-table (:id @table1d)
-                                 :filter       [:>= [:field (:id @field1d) nil] 18]
-                                 :aggregation  [[:count]]}
-                      :database (:id @db1d)}
-                     (:dataset_query @card1d))))))))))
+              (is (=? {:type     :query
+                       :query    {:source-table (:id @table1d)
+                                  :filter       [:>= [:field (:id @field1d) nil] 18]
+                                  :aggregation  [[:count]]
+                                  :aggregation-idents {0 string?}}
+                       :database (:id @db1d)}
+                      (:dataset_query @card1d))))))))))
 
 (deftest segment-test
   ;; Segment.definition is a JSON-encoded MBQL query, which contain database, table, and field IDs - these need to be
@@ -699,10 +700,10 @@
       (ts/with-dbs [source-db dest-db]
         (testing "serializing the original entities"
           (ts/with-db source-db
-            (reset! user1s    (ts/create! :model/User :first_name "Tom" :last_name "Scholz" :email "tom@bost.on"))
-            (reset! user2s    (ts/create! :model/User :first_name "Neil"  :last_name "Peart"   :email "neil@rush.yyz"))
-            (reset! dash1s    (ts/create! :model/Dashboard :name "My Dashboard" :creator_id (:id @user1s)))
-            (reset! dash2s    (ts/create! :model/Dashboard :name "Linked dashboard" :creator_id (:id @user2s)))
+            (reset! user1s     (ts/create! :model/User :first_name "Tom" :last_name "Scholz" :email "tom@bost.on"))
+            (reset! user2s     (ts/create! :model/User :first_name "Neil"  :last_name "Peart"   :email "neil@rush.yyz"))
+            (reset! dash1s     (ts/create! :model/Dashboard :name "My Dashboard" :creator_id (:id @user1s)))
+            (reset! dash2s     (ts/create! :model/Dashboard :name "Linked dashboard" :creator_id (:id @user2s)))
             (reset! serialized (into [] (serdes.extract/extract {})))))
 
         (testing "deserializing finds the matching user and synthesizes the missing one"
@@ -724,14 +725,14 @@
             (testing "the Dashboards and Users have different IDs now"
               (is (not= (:id @dash1s) (:id @dash1d)))
               (is (not= (:id @dash2s) (:id @dash2d)))
-              (is (not= (:id @user1s)   (:id @user1d))))
+              (is (not= (:id @user1s) (:id @user1d))))
 
             (testing "both existing User and the new one are set up properly"
               (is (= (:id @user1d) (:creator_id @dash1d)))
               (let [user2d-id (:creator_id @dash2d)
-                    user2d    (t2/select-one :model/User :id user2d-id)]
-                (is (any? user2d))
-                (is (= (:email @user2s) (:email user2d)))))))))))
+                    user2d    (t2/select-one [:model/User :email :is_active] :id user2d-id)]
+                (is (= (:email @user2s) (:email user2d)))
+                (is (false? (:is_active user2d)))))))))))
 
 (deftest field-values-test
   ;; FieldValues are a bit special - they map 1-1 with Fields but are a separate table serialized separately.
@@ -1386,3 +1387,17 @@
 
       (is (= "desc"
              (t2/select-one-fn :description :model/Field (:id f3)))))))
+
+(deftest blank-eid-creates-new-entity-test
+  (mt/with-empty-h2-app-db
+    (let [db         (ts/create! :model/Collection :name "mycoll")
+          [coll-ser] (serdes.extract/extract {:targets [["Collection" (:id db)]]})
+          new-coll   (assoc coll-ser :entity_id nil)
+          coll-count (fn [] (t2/count :model/Collection :name "mycoll"))]
+      (serdes.load/load-metabase! (ingestion-in-memory [new-coll]))
+      (is (= 2 (coll-count)))
+      (serdes.load/load-metabase! (ingestion-in-memory [new-coll]))
+      (is (= 3 (coll-count)))
+      (testing "absent :entity_id also works"
+        (serdes.load/load-metabase! (ingestion-in-memory [(dissoc coll-ser :entity_id)]))
+        (is (= 4 (coll-count)))))))

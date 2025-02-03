@@ -19,17 +19,17 @@
   pulses that are a collection of cards, not dashboard."
   (:require
    [clojure.string :as str]
-   [malli.core :as mc]
    [medley.core :as m]
    [metabase.api.common :as api]
    [metabase.events :as events]
    [metabase.models.collection :as collection]
    [metabase.models.interface :as mi]
-   [metabase.models.permissions :as perms]
    [metabase.models.pulse-channel :as pulse-channel]
+   [metabase.permissions.core :as perms]
    [metabase.util :as u]
    [metabase.util.i18n :refer [deferred-tru tru]]
    [metabase.util.malli :as mu]
+   [metabase.util.malli.registry :as mr]
    [metabase.util.malli.schema :as ms]
    [methodical.core :as methodical]
    [toucan2.core :as t2]))
@@ -49,7 +49,7 @@
   {:parameters mi/transform-json})
 
 (defn- assert-valid-parameters [{:keys [parameters]}]
-  (when-not (mc/validate [:maybe
+  (when-not (mr/validate [:maybe
                           [:sequential
                            [:and
                             [:map [:id ms/NonBlankString]]
@@ -378,10 +378,13 @@
           hydrate-notification
           notification->pulse))))
 
-(defn retrieve-user-alerts-for-card
+(mu/defn retrieve-user-alerts-for-card
   "Find all alerts for `card-id` that `user-id` is set to receive"
   [{:keys [archived? card-id user-id]
-    :or   {archived? false}}]
+    :or   {archived? false}} :- [:map
+                                 [:card-id pos-int?]
+                                 [:user-id pos-int?]
+                                 [:archived? {:optional true} boolean?]]]
   (assert boolean? archived?)
   (map (comp notification->alert hydrate-notification)
        (query-as :model/Pulse
@@ -396,10 +399,14 @@
                            [:= :pcr.user_id user-id]
                            [:= :p.archived archived?]]})))
 
-(defn retrieve-alerts-for-cards
+(mu/defn retrieve-alerts-for-cards
   "Find all alerts for `card-ids`, used for admin users"
   [{:keys [archived? card-ids]
-    :or   {archived? false}}]
+    :or   {archived? false}} :- [:map
+                                 [:card-ids [:maybe [:or
+                                                     [:sequential pos-int?]
+                                                     [:set pos-int?]]]]
+                                 [:archived? {:optional true} boolean?]]]
   (when (seq card-ids)
     (map (comp notification->alert hydrate-notification)
          (query-as :model/Pulse

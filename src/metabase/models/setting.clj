@@ -423,8 +423,8 @@
 (defn- has-feature?
   [feature]
   (u/ignore-exceptions
-    (classloader/require 'metabase.public-settings.premium-features))
-  (let [has-feature?' (resolve 'metabase.public-settings.premium-features/has-feature?)]
+    (classloader/require 'metabase.premium-features.token-check))
+  (let [has-feature?' (resolve 'metabase.premium-features.token-check/has-feature?)]
     (has-feature?' feature)))
 
 (defn has-advanced-setting-access?
@@ -435,7 +435,7 @@
       (do
         (when config/ee-available?
           (classloader/require 'metabase-enterprise.advanced-permissions.common
-                               'metabase.public-settings.premium-features))
+                               'metabase.premium-features.token-check))
         (if-let [current-user-has-application-permissions?
                  (and (has-feature? :advanced-permissions)
                       (resolve 'metabase-enterprise.advanced-permissions.common/current-user-has-application-permissions?))]
@@ -1422,9 +1422,8 @@
 
   `options` are passed to [[user-facing-value]].
 
-  This is currently used by `GET /api/setting` ([[metabase.api.setting/GET_]]; admin-only; powers the Admin Settings
-  page) so all admin-visible Settings should be included. We *do not* want to return env var values, since admins
-  are not allowed to modify them.
+  This is currently used by `GET /api/setting` (admin-only; powers the Admin Settings page) so all admin-visible
+  Settings should be included. We *do not* want to return env var values, since admins are not allowed to modify them.
 
   For settings managers who are not admins, only the subset of settings with the :settings-manager visibility level
   are returned."
@@ -1470,7 +1469,7 @@
 
   Settings marked `:sensitive?` (e.g. passwords) are excluded.
 
-  This is currently used by `GET /api/session/properties` ([[metabase.api.session/GET_properties]]) and
+  This is currently used by `GET /api/session/properties` and
   in [[metabase.server.routes.index/load-entrypoint-template]]. These are used as read-only sources of Settings for
   the frontend client. For that reason, these Settings *should* include values that come back from environment
   variables, *unless* they are marked `:sensitive?`."
@@ -1494,6 +1493,7 @@
 
 (defmulti may-contain-raw-token?
   "Indicate whether we must redact an exception to avoid leaking sensitive env vars"
+  {:arglists '([ex setting])}
   (fn [_ex setting] (:type setting)))
 
 ;; fallback to redaction if we have not defined behaviour for a given format
@@ -1587,14 +1587,17 @@
 (defn- maybe-encrypt [setting-model]
   ;; In tests, sometimes we need to insert/update settings that don't have definitions in the code and therefore can't
   ;; be resolved. Fall back to maybe-encrypting these.
-  (let [resolved (try (resolve-setting (:key setting-model))
-                      (catch clojure.lang.ExceptionInfo e
-                        (when (not (::unknown-setting-error (ex-data e)))
-                          (throw e))))]
-    (cond-> setting-model
-      (or (nil? resolved)
-          (not (prohibits-encryption? resolved)))
-      (update :value encryption/maybe-encrypt))))
+  ;; Don't do any automatic handling of the "encryption-check" special setting used by mdb.encryption
+  (if (= "encryption-check" (:key setting-model))
+    setting-model
+    (let [resolved (try (resolve-setting (:key setting-model))
+                        (catch clojure.lang.ExceptionInfo e
+                          (when (not (::unknown-setting-error (ex-data e)))
+                            (throw e))))]
+      (cond-> setting-model
+        (or (nil? resolved)
+            (not (prohibits-encryption? resolved)))
+        (update :value encryption/maybe-encrypt)))))
 
 (t2/define-before-update :model/Setting
   [setting]
@@ -1606,4 +1609,7 @@
 
 (t2/define-after-select :model/Setting
   [setting]
-  (update setting :value encryption/maybe-decrypt))
+  ;; Don't do any automatic handling of the "encryption-check" special setting used by mdb.encryption
+  (if (= "encryption-check" (:key setting))
+    setting
+    (update setting :value encryption/maybe-decrypt)))

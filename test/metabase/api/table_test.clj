@@ -9,16 +9,15 @@
    [metabase.driver.util :as driver.u]
    [metabase.http-client :as client]
    [metabase.lib.util.match :as lib.util.match]
-   [metabase.models.data-permissions :as data-perms]
-   [metabase.models.permissions :as perms]
-   [metabase.models.permissions-group :as perms-group]
+   [metabase.permissions.models.data-permissions :as data-perms]
+   [metabase.permissions.models.permissions :as perms]
+   [metabase.permissions.models.permissions-group :as perms-group]
    [metabase.request.core :as request]
    [metabase.test :as mt]
    [metabase.timeseries-query-processor-test.util :as tqpt]
    [metabase.upload-test :as upload-test]
    [metabase.util :as u]
-   [toucan2.core :as t2]
-   [toucan2.tools.with-temp :as t2.with-temp]))
+   [toucan2.core :as t2]))
 
 (set! *warn-on-reflection* true)
 
@@ -382,7 +381,7 @@
 
 (deftest ^:parallel update-table-test
   (testing "PUT /api/table/:id"
-    (t2.with-temp/with-temp [:model/Table table]
+    (mt/with-temp [:model/Table table]
       (mt/user-http-request :crowberto :put 200 (format "table/%d" (u/the-id table))
                             {:display_name    "Userz"
                              :visibility_type "hidden"
@@ -404,7 +403,7 @@
   (testing "PUT /api/table/:id"
     (testing "Can update description, caveat, points of interest to be empty (#11097)"
       (doseq [property [:caveats :points_of_interest :description]]
-        (t2.with-temp/with-temp [:model/Table table]
+        (mt/with-temp [:model/Table table]
           (is (= ""
                  (get (mt/user-http-request :crowberto :put 200 (format "table/%d" (u/the-id table))
                                             {property ""})
@@ -414,7 +413,7 @@
   (testing "PUT /api/table/:id"
     (testing "Don't change visibility_type when updating properties (#22287)"
       (doseq [property [:caveats :points_of_interest :description :display_name]]
-        (t2.with-temp/with-temp [:model/Table table {:visibility_type "hidden"}]
+        (mt/with-temp [:model/Table table {:visibility_type "hidden"}]
           (mt/user-http-request :crowberto :put 200 (format "table/%d" (u/the-id table))
                                 {property (mt/random-name)})
           (is (= :hidden (t2/select-one-fn :visibility_type :model/Table :id (:id table)))))))))
@@ -422,7 +421,7 @@
 (deftest ^:parallel update-table-test-4
   (testing "PUT /api/table/:id"
     (testing "A table can only be updated by a superuser"
-      (t2.with-temp/with-temp [:model/Table table]
+      (mt/with-temp [:model/Table table]
         (mt/user-http-request :rasta :put 403 (format "table/%d" (u/the-id table)) {:display_name "Userz"})))))
 
 ;; see how many times sync-table! gets called when we call the PUT endpoint. It should happen when you switch from
@@ -430,10 +429,10 @@
 (deftest update-table-sync-test
   (testing "PUT /api/table/:id"
     (testing "Table should get synced when it gets unhidden"
-      (t2.with-temp/with-temp [:model/Database db    {:details (:details (mt/db))}
-                               :model/Table    table (-> (t2/select-one :model/Table (mt/id :venues))
-                                                         (dissoc :id)
-                                                         (assoc :db_id (:id db)))]
+      (mt/with-temp [:model/Database db    {:details (:details (mt/db))}
+                     :model/Table    table (-> (t2/select-one :model/Table (mt/id :venues))
+                                               (dissoc :id)
+                                               (assoc :db_id (:id db)))]
         (let [called (atom 0)
               ;; original is private so a var will pick up the redef'd. need contents of var before
               original (var-get #'api.table/sync-unhidden-tables)]
@@ -646,11 +645,11 @@
 (deftest ^:parallel virtual-table-metadata-test
   (testing "GET /api/table/:id/query_metadata"
     (testing "Make sure metadata for 'virtual' tables comes back as expected"
-      (t2.with-temp/with-temp [:model/Card card {:name          "Go Dubs!"
-                                                 :database_id   (mt/id)
-                                                 :dataset_query {:database (mt/id)
-                                                                 :type     :native
-                                                                 :native   {:query (format "SELECT NAME, ID, PRICE, LATITUDE FROM VENUES")}}}]
+      (mt/with-temp [:model/Card card {:name          "Go Dubs!"
+                                       :database_id   (mt/id)
+                                       :dataset_query {:database (mt/id)
+                                                       :type     :native
+                                                       :native   {:query (format "SELECT NAME, ID, PRICE, LATITUDE FROM VENUES")}}}]
         ;; run the Card which will populate its result_metadata column
         (mt/user-http-request :crowberto :post 202 (format "card/%d/query" (u/the-id card)))
         ;; Now fetch the metadata for this "table"
@@ -659,6 +658,7 @@
                   :schema            "Everything else"
                   :db_id             (:database_id card)
                   :id                card-virtual-table-id
+                  :entity_id         (:entity_id card)
                   :type              "question"
                   :moderated_status  nil
                   :metrics           nil
@@ -672,6 +672,7 @@
                                               :display_name   "NAME"
                                               :base_type      "type/Text"
                                               :effective_type "type/Text"
+                                              :database_type  "CHARACTER VARYING"
                                               :semantic_type  "type/Name"
                                               :fingerprint    (name->fingerprint :name)
                                               :field_ref      ["field" "NAME" {:base-type "type/Text"}]}
@@ -679,6 +680,7 @@
                                               :display_name   "ID"
                                               :base_type      "type/BigInteger"
                                               :effective_type "type/BigInteger"
+                                              :database_type  "BIGINT"
                                               :semantic_type  nil
                                               :fingerprint    (name->fingerprint :id)
                                               :field_ref      ["field" "ID" {:base-type "type/BigInteger"}]}
@@ -687,6 +689,7 @@
                                                 :display_name   "PRICE"
                                                 :base_type      "type/Integer"
                                                 :effective_type "type/Integer"
+                                                :database_type  "INTEGER"
                                                 :semantic_type  nil
                                                 :fingerprint    (name->fingerprint :price)
                                                 :field_ref      ["field" "PRICE" {:base-type "type/Integer"}]})
@@ -695,6 +698,7 @@
                                                 :display_name   "LATITUDE"
                                                 :base_type      "type/Float"
                                                 :effective_type "type/Float"
+                                                :database_type  "DOUBLE PRECISION"
                                                 :semantic_type  "type/Latitude"
                                                 :fingerprint    (name->fingerprint :latitude)
                                                 :field_ref      ["field" "LATITUDE" {:base-type "type/Float"}]})]))})
@@ -727,11 +731,11 @@
 (deftest ^:parallel include-date-dimensions-in-nested-query-test
   (testing "GET /api/table/:id/query_metadata"
     (testing "Test date dimensions being included with a nested query"
-      (t2.with-temp/with-temp [:model/Card card {:name          "Users"
-                                                 :database_id   (mt/id)
-                                                 :dataset_query {:database (mt/id)
-                                                                 :type     :native
-                                                                 :native   {:query (format "SELECT NAME, LAST_LOGIN FROM USERS")}}}]
+      (mt/with-temp [:model/Card card {:name          "Users"
+                                       :database_id   (mt/id)
+                                       :dataset_query {:database (mt/id)
+                                                       :type     :native
+                                                       :native   {:query (format "SELECT NAME, LAST_LOGIN FROM USERS")}}}]
         (let [card-virtual-table-id (str "card__" (u/the-id card))]
           ;; run the Card which will populate its result_metadata column
           (mt/user-http-request :crowberto :post 202 (format "card/%d/query" (u/the-id card)))
@@ -741,6 +745,7 @@
                     :schema            "Everything else"
                     :db_id             (:database_id card)
                     :id                card-virtual-table-id
+                    :entity_id         (:entity_id card)
                     :type              "question"
                     :description       nil
                     :moderated_status  nil
@@ -750,6 +755,7 @@
                                          :display_name             "NAME"
                                          :base_type                "type/Text"
                                          :effective_type           "type/Text"
+                                         :database_type            "CHARACTER VARYING"
                                          :table_id                 card-virtual-table-id
                                          :id                       ["field" "NAME" {:base-type "type/Text"}]
                                          :semantic_type            "type/Name"
@@ -761,6 +767,7 @@
                                          :display_name             "LAST_LOGIN"
                                          :base_type                "type/DateTime"
                                          :effective_type           "type/DateTime"
+                                         :database_type            "TIMESTAMP"
                                          :table_id                 card-virtual-table-id
                                          :id                       ["field" "LAST_LOGIN" {:base-type "type/DateTime"}]
                                          :semantic_type            nil
@@ -773,21 +780,21 @@
 
 (deftest include-metrics-for-card-test
   (testing "GET /api/table/:id/query_metadata"
-    (t2.with-temp/with-temp [:model/Card model {:name          "Venues model"
-                                                :database_id   (mt/id)
-                                                :type          :model
-                                                :dataset_query (mt/mbql-query venues)}]
+    (mt/with-temp [:model/Card model {:name          "Venues model"
+                                      :database_id   (mt/id)
+                                      :type          :model
+                                      :dataset_query (mt/mbql-query venues)}]
       (let [card-virtual-table-id (str "card__" (:id model))
             metric-query          {:database 2
                                    :type     "query"
                                    :query    {:source-table card-virtual-table-id
                                               :aggregation  [["count"]]}}]
-        (t2.with-temp/with-temp [:model/Collection coll   {:name "My Collection"}
-                                 :model/Card       metric {:name          "Venues metric"
-                                                           :database_id   (mt/id)
-                                                           :collection_id (:id coll)
-                                                           :type          :metric
-                                                           :dataset_query metric-query}]
+        (mt/with-temp [:model/Collection coll   {:name "My Collection"}
+                       :model/Card       metric {:name          "Venues metric"
+                                                 :database_id   (mt/id)
+                                                 :collection_id (:id coll)
+                                                 :type          :metric
+                                                 :dataset_query metric-query}]
           (perms/revoke-collection-permissions! (perms-group/all-users) (:id coll))
           (testing "Test metrics being included with cards"
             (is (=? {:display_name "Venues model"
@@ -1017,10 +1024,10 @@
   (testing "GET /api/table/:id/query_metadata"
     (testing "binning options for nested queries"
       (mt/test-drivers (mt/normal-drivers-with-feature :binning :nested-queries)
-        (t2.with-temp/with-temp [:model/Card card {:database_id   (mt/id)
-                                                   :dataset_query {:database (mt/id)
-                                                                   :type    :query
-                                                                   :query    {:source-query {:source-table (mt/id :venues)}}}}]
+        (mt/with-temp [:model/Card card {:database_id   (mt/id)
+                                         :dataset_query {:database (mt/id)
+                                                         :type    :query
+                                                         :query    {:source-query {:source-table (mt/id :venues)}}}}]
           (letfn [(dimension-options []
                     (let [response (mt/user-http-request :crowberto :get 200 (format "table/card__%d/query_metadata" (u/the-id card)))]
                       (map #(dimension-options-for-field response %) ["latitude" "longitude"])))]
@@ -1045,9 +1052,9 @@
                            :source-table $$venues})
           base-card     {:database_id   (mt/id)
                          :dataset_query dataset-query}]
-      (t2.with-temp/with-temp [:model/Card question base-card
-                               :model/Card model    (assoc base-card :type :model)
-                               :model/Card metric   (assoc base-card :type :metric)]
+      (mt/with-temp [:model/Card question base-card
+                     :model/Card model    (assoc base-card :type :model)
+                     :model/Card metric   (assoc base-card :type :metric)]
         (are [card expected-type] (=? expected-type
                                       (->> (format "table/card__%d/query_metadata" (:id card))
                                            (mt/user-http-request :crowberto :get 200)
@@ -1108,7 +1115,8 @@
       (testing "Can we set custom field ordering?"
         (let [custom-field-order [(mt/id :venues :price) (mt/id :venues :longitude) (mt/id :venues :id)
                                   (mt/id :venues :category_id) (mt/id :venues :name) (mt/id :venues :latitude)]]
-          (mt/user-http-request :crowberto :put 200 (format "table/%s/fields/order" (mt/id :venues)) custom-field-order)
+          (is (=? {:success true}
+                  (mt/user-http-request :crowberto :put 200 (format "table/%s/fields/order" (mt/id :venues)) custom-field-order)))
           (is (= custom-field-order
                  (->> (t2/hydrate (t2/select-one :model/Table :id (mt/id :venues)) :fields)
                       :fields
