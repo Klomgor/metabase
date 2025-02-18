@@ -5,20 +5,21 @@
    [clojure.test :refer :all]
    [metabase-enterprise.advanced-permissions.api.util-test :as advanced-perms.api.tu]
    [metabase-enterprise.advanced-permissions.driver.impersonation :as impersonation]
+   [metabase-enterprise.test :as met]
    [metabase.driver.postgres-test :as postgres-test]
    [metabase.driver.sql-jdbc.connection :as sql-jdbc.conn]
    [metabase.query-processor :as qp]
    [metabase.request.core :as request]
-   [metabase.sync :as sync]
+   [metabase.sync.core :as sync]
    [metabase.test :as mt]
    [metabase.test.data.sql :as sql.tx]
    [metabase.util :as u]
-   [toucan2.core :as t2]
-   [toucan2.tools.with-temp :as t2.with-temp]))
+   [toucan2.core :as t2]))
 
 (deftest ^:parallel connection-impersonation-role-test
   (testing "Returns nil when no impersonations are in effect"
-    (is (nil? (@#'impersonation/connection-impersonation-role (mt/db))))))
+    (mt/with-test-user :rasta
+      (is (nil? (@#'impersonation/connection-impersonation-role (mt/db)))))))
 
 (deftest connection-impersonation-role-test-2
   (testing "Correctly fetches the impersonation when one is in effect"
@@ -79,6 +80,17 @@
            #"Connection impersonation attribute is invalid: role must be a single non-empty string."
            (@#'impersonation/connection-impersonation-role (mt/db)))))))
 
+(deftest connection-impersonation-role-test-9
+  (testing "Throws an exception if sandboxing policies are also defined for the current user on the DB"
+    (met/with-gtaps! {:gtaps {:venues {:query (mt/mbql-query venues)}}}
+      (advanced-perms.api.tu/with-impersonations! {:impersonations [{:db-id (mt/id) :attribute "impersonation_attr"}]
+                                                   :attributes     {"impersonation_attr" "impersonation_role"}}
+        (mt/with-test-user :rasta
+          (is (thrown-with-msg?
+               clojure.lang.ExceptionInfo
+               #"Conflicting sandboxing and impersonation policies found."
+               (@#'impersonation/connection-impersonation-role (mt/db)))))))))
+
 (deftest conn-impersonation-test-postgres
   (mt/test-driver :postgres
     (mt/with-premium-features #{:advanced-permissions}
@@ -95,7 +107,7 @@
                            "REVOKE ALL PRIVILEGES ON DATABASE \"conn_impersonation_test\" FROM \"impersonation.role\";"
                            "GRANT SELECT ON TABLE \"conn_impersonation_test\".PUBLIC.table_with_access TO \"impersonation.role\";"]]
           (jdbc/execute! spec [statement]))
-        (t2.with-temp/with-temp [:model/Database database {:engine :postgres, :details details}]
+        (mt/with-temp [:model/Database database {:engine :postgres, :details details}]
           (mt/with-db database (sync/sync-database! database)
             (advanced-perms.api.tu/with-impersonations! {:impersonations [{:db-id (mt/id) :attribute "impersonation_attr"}]
                                                          :attributes     {"impersonation_attr" "impersonation.role"}}

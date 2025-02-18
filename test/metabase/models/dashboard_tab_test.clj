@@ -3,11 +3,10 @@
    [clojure.test :refer :all]
    [metabase.api.common :as api]
    [metabase.models.interface :as mi]
-   [metabase.models.permissions :as perms]
+   [metabase.permissions.models.permissions :as perms]
    [metabase.test :as mt]
    [metabase.test.fixtures :as fixtures]
-   [toucan2.core :as t2]
-   [toucan2.tools.with-temp :as t2.with-temp]))
+   [toucan2.core :as t2]))
 
 (use-fixtures
   :once
@@ -16,7 +15,7 @@
 (defn do-with-dashtab-in-personal-collection [f]
   (let [owner-id (mt/user->id :rasta)
         coll     (t2/select-one :model/Collection :personal_owner_id owner-id)]
-    (t2.with-temp/with-temp
+    (mt/with-temp
       [:model/Card            card     {}
        :model/Dashboard       dash     {:collection_id (:id coll)}
        :model/DashboardTab dashtab  {:dashboard_id (:id dash)}
@@ -76,7 +75,7 @@
 
 (deftest hydration-test
   (testing "hydrate a dashboard will return all of its tabs"
-    (t2.with-temp/with-temp
+    (mt/with-temp
       [:model/Card            card      {}
        :model/Dashboard       dashboard {}
        :model/DashboardTab dashtab-1 {:dashboard_id (:id dashboard) :position 0}
@@ -88,7 +87,7 @@
               (t2/hydrate dashboard :tabs))))))
 
 (deftest hydrate-tabs-card-test
-  (t2.with-temp/with-temp
+  (mt/with-temp
     [:model/Dashboard    {dashboard-id :id}    {}
      :model/DashboardTab {tab-2-id :id}        {:name         "Tab 2"
                                                 :dashboard_id dashboard-id
@@ -96,24 +95,29 @@
      :model/DashboardTab {tab-1-id :id}        {:name         "Tab 1"
                                                 :dashboard_id dashboard-id
                                                 :position     0}
+     :model/DashboardTab {empty-tab-id :id}    {:name         "Empty Tab"
+                                                :dashboard_id dashboard-id
+                                                :position     2}
      :model/DashboardCard {dash-2-tab1-id :id} {:dashboard_id     dashboard-id
-                                                :row             0
-                                                :col             1
+                                                :row              0
+                                                :col              1
                                                 :dashboard_tab_id tab-1-id}
      :model/DashboardCard {dash-1-tab1-id :id} {:dashboard_id     dashboard-id
-                                                :row             0
-                                                :col             0
+                                                :row              0
+                                                :col              0
                                                 :dashboard_tab_id tab-1-id}
      :model/DashboardCard {dash-2-tab2-id :id} {:dashboard_id     dashboard-id
-                                                :row             1
+                                                :row              1
                                                 :dashboard_tab_id tab-2-id}
      :model/DashboardCard {dash-1-tab2-id :id} {:dashboard_id     dashboard-id
-                                                :row             0
+                                                :row              0
                                                 :dashboard_tab_id tab-2-id}]
     (is (=? [{:id    tab-1-id
               :cards [{:id dash-1-tab1-id}
                       {:id dash-2-tab1-id}]}
              {:id    tab-2-id
               :cards [{:id dash-1-tab2-id}
-                      {:id dash-2-tab2-id}]}]
+                      {:id dash-2-tab2-id}]}
+             {:id    empty-tab-id
+              :cards []}]
             (t2/hydrate (t2/select :model/DashboardTab :dashboard_id dashboard-id) :tab-cards)))))

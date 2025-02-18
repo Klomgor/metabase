@@ -245,7 +245,7 @@ export type OrderByClauseDisplayInfo = ClauseDisplayInfo & {
   direction: OrderByDirection;
 };
 
-export type ExpressionOperatorName =
+export type ExpressionOperator =
   | "+"
   | "-"
   | "*"
@@ -278,7 +278,7 @@ export type ExpressionOperatorName =
 export type ExpressionArg = null | boolean | number | string | ColumnMetadata;
 
 export type ExpressionParts = {
-  operator: ExpressionOperatorName;
+  operator: ExpressionOperator;
   args: (ExpressionArg | ExpressionParts)[];
   options: ExpressionOptions;
 };
@@ -384,17 +384,19 @@ export type StringFilterOptions = {
   caseSensitive?: boolean;
 };
 
+export type NumberFilterValue = number | bigint;
+
 export type NumberFilterParts = {
   operator: NumberFilterOperator;
   column: ColumnMetadata;
-  values: number[];
+  values: NumberFilterValue[];
 };
 
 export type CoordinateFilterParts = {
   operator: CoordinateFilterOperator;
   column: ColumnMetadata;
   longitudeColumn: ColumnMetadata | null;
-  values: number[];
+  values: NumberFilterValue[];
 };
 
 export type BooleanFilterParts = {
@@ -474,7 +476,6 @@ export type DrillThruType =
   | "drill-thru/column-extract"
   | "drill-thru/column-filter"
   | "drill-thru/combine-columns"
-  | "drill-thru/compare-aggregations"
   | "drill-thru/distribution"
   | "drill-thru/fk-details"
   | "drill-thru/fk-filter"
@@ -507,9 +508,6 @@ export type ColumnExtractDrillThruInfo =
     displayName: string;
     extractions: ColumnExtractionInfo[];
   };
-
-export type CompareAggregationsDrillThruInfo =
-  BaseDrillThruInfo<"drill-thru/compare-aggregations">;
 
 export type CombineColumnsDrillThruInfo =
   BaseDrillThruInfo<"drill-thru/combine-columns">;
@@ -580,7 +578,6 @@ export type ZoomTimeseriesDrillThruInfo =
 export type DrillThruDisplayInfo =
   | ColumnExtractDrillThruInfo
   | CombineColumnsDrillThruInfo
-  | CompareAggregationsDrillThruInfo
   | QuickFilterDrillThruInfo
   | PKDrillThruInfo
   | ZoomDrillThruInfo
@@ -601,17 +598,12 @@ export type FilterDrillDetails = {
   column: ColumnMetadata;
 };
 
-export type CombineColumnsDrillDetails = {
-  query: Query;
-  stageIndex: number;
-  column: ColumnMetadata;
-};
-
-export type AggregationDrillDetails = {
-  aggregation: AggregationClause;
-};
-
 export type PivotType = "category" | "location" | "time";
+
+export type PivotDrillDetails = {
+  pivotTypes: PivotType[];
+  stageIndex: number;
+};
 
 export interface ClickObjectDimension {
   value: RowValue;

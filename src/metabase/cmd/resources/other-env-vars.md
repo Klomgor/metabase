@@ -74,13 +74,6 @@ Default: `config.yml`
 
 This feature requires the `config-text-file` feature flag on your token.
 
-### `MB_CUSTOM_GEOJSON_ENABLED`
-
-Type: boolean<br>
-Default: `true`
-
-Whether or not the use of custom GeoJSON is enabled.
-
 ### `MB_DB_AUTOMIGRATE`
 
 Type: boolean<br>
@@ -170,6 +163,15 @@ Default: `null`
 
 Used during development of third-party drivers. Set the value to have that plugin manifest get loaded during startup. Specify multiple plugin manifests by comma-separating them.
 
+### `MB_DISABLE_SCHEDULER`
+
+Type: boolean<br>
+Default: `false`
+
+When `true`, Metabase will turn off Metabase’s scheduled jobs, which include syncs, fingerprinting, and scanning, as well as dashboard subscriptions, alerts, and model caching.
+
+Can be useful for testing, or when setting up a [git-based workflow](https://www.metabase.com/learn/metabase-basics/administration/administration-and-operation/git-based-workflow).
+
 ### `MB_DISABLE_SESSION_THROTTLE`
 
 Type: boolean<br>
@@ -192,13 +194,6 @@ Type: boolean<br>
 Default: `null`
 
 When `true`, this will enable `/api/testing` endpoint. **Warning:** This should never be enabled in production system.
-
-### `MB_ENABLE_XRAYS`
-
-Type: boolean<br>
-Default: `true`
-
-Allow users to explore data using X-rays.
 
 ### `MB_ENCRYPTION_SECRET_KEY`
 

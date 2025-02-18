@@ -11,16 +11,15 @@ export function setMonthAndYear({ month, year } = {}) {
 }
 
 export function setQuarterAndYear({ quarter, year } = {}) {
-  cy.findByTestId("select-year-picker")
-    .should("have.value", currentYearString)
-    .click();
-
-  selectDropdown().findByText(year).click();
-  popover().findByText(quarter).click();
+  popover().within(() => {
+    cy.findByText(currentYearString).click();
+    cy.findByText(year).click();
+    cy.findByText(quarter).click();
+  });
 }
 
 export function setSingleDate(date) {
-  cy.findByLabelText("Date").clear().type(date).blur();
+  popover().findByLabelText("Date").clear().type(date).blur();
 }
 
 export function setTime({ hours, minutes }) {
@@ -59,7 +58,9 @@ export function setAdHocFilter(
   }
 
   if (timeBucket) {
-    cy.findByLabelText("Unit").should("have.value", "days").click();
+    cy.findByRole("textbox", { name: "Unit" })
+      .should("have.value", "days")
+      .click();
 
     selectDropdown().contains(timeBucket).click();
   }
