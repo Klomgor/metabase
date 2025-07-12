@@ -1,15 +1,18 @@
 import { useDisclosure } from "@mantine/hooks";
 import { t } from "ttag";
 
+import {
+  SettingsPageWrapper,
+  SettingsSection,
+} from "metabase/admin/components/SettingsSection";
 import { UpsellHostingBanner } from "metabase/admin/upsells";
 import { useGetSettingsQuery } from "metabase/api";
+import { LoadingAndErrorWrapper } from "metabase/common/components/LoadingAndErrorWrapper";
 import { useHasTokenFeature } from "metabase/common/hooks";
-import { LoadingAndErrorWrapper } from "metabase/components/LoadingAndErrorWrapper";
 import { Center } from "metabase/ui";
 
 import { SMTPConnectionCard } from "../Email/SMTPConnectionCard";
 import { SMTPConnectionForm } from "../Email/SMTPConnectionForm";
-import { SettingsPageWrapper, SettingsSection } from "../SettingsSection";
 import { AdminSettingInput } from "../widgets/AdminSettingInput";
 import { EmailReplyToWidget } from "../widgets/EmailReplyToWidget";
 
@@ -83,7 +86,7 @@ export function EmailSettingsPage() {
           </SettingsSection>
         )}
         <Center>
-          <UpsellHostingBanner source="settings-email-migrate_to_cloud" />
+          <UpsellHostingBanner location="settings-email-migrate_to_cloud" />
         </Center>
       </SettingsPageWrapper>
       {showModal && <SMTPConnectionForm onClose={closeModal} />}

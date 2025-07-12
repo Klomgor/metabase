@@ -6,6 +6,7 @@ import styled from "@emotion/styled";
 import type {
   ChangeEventHandler,
   HTMLAttributes,
+  KeyboardEvent,
   KeyboardEventHandler,
   MouseEventHandler,
   Ref,
@@ -20,7 +21,7 @@ import {
 } from "react";
 import { t } from "ttag";
 
-import ControlledPopoverWithTrigger from "metabase/components/PopoverWithTrigger/ControlledPopoverWithTrigger";
+import ControlledPopoverWithTrigger from "metabase/common/components/PopoverWithTrigger/ControlledPopoverWithTrigger";
 import { useTranslateContent } from "metabase/i18n/hooks";
 import { lighten } from "metabase/lib/colors";
 
@@ -107,7 +108,10 @@ const _TabButton = forwardRef(function TabButton(
 
   const handleInputKeyPress: KeyboardEventHandler<HTMLInputElement> =
     useCallback(
-      (event: React.KeyboardEvent) => {
+      (event: KeyboardEvent) => {
+        if (event.nativeEvent.isComposing) {
+          return;
+        }
         if (event.key === "Enter" && typeof inputRef === "object") {
           inputRef?.current?.blur();
         }

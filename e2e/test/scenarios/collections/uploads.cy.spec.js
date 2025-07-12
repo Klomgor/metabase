@@ -84,16 +84,9 @@ H.describeWithSnowplow(
 
       cy.findByRole("link", { name: "Table Metadata" }).click();
 
-      cy.findByTestId("admin-metadata-header")
-        .findByText("Sample Database")
-        .click();
-
-      H.popover().findByText("Writable Postgres12").click();
-
-      cy.findByTestId("admin-metadata-table-list").within(() => {
-        cy.findByText("1 Queryable Table").should("exist");
-        cy.findByText("Dog Breeds").should("exist");
-      });
+      H.DataModel.TablePicker.getDatabase("Writable Postgres12").click();
+      H.DataModel.TablePicker.getTables().should("have.length", 1);
+      H.DataModel.TablePicker.getTable("Dog Breeds").should("be.visible");
     });
 
     ["postgres", "mysql"].forEach((dialect) => {
@@ -281,7 +274,7 @@ describe("permissions", { tags: "@external" }, () => {
     H.restore("postgres-12");
     cy.signInAsAdmin();
 
-    H.setTokenFeatures("all");
+    H.activateToken("pro-self-hosted");
     H.enableUploads("postgres");
 
     //Deny access for all users to writable DB
@@ -322,7 +315,7 @@ describe("permissions", { tags: "@external" }, () => {
     H.restore("postgres-12");
     cy.signInAsAdmin();
 
-    H.setTokenFeatures("all");
+    H.activateToken("pro-self-hosted");
     H.enableUploads("postgres");
 
     cy.updatePermissionsGraph({
@@ -360,7 +353,7 @@ describe("Upload Table Cleanup/Management", { tags: "@external" }, () => {
     H.restore("postgres-12");
     cy.signInAsAdmin();
     H.enableUploads("postgres");
-    H.setTokenFeatures("all");
+    H.activateToken("pro-self-hosted");
   });
 
   it("should allow a user to delete an upload table", () => {

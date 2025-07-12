@@ -3,16 +3,16 @@ import cx from "classnames";
 import { merge } from "icepick";
 import PropTypes from "prop-types";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { usePrevious } from "react-use";
+import { useMount, usePrevious } from "react-use";
 import { t } from "ttag";
 
 import { useListModelIndexesQuery } from "metabase/api";
+import ActionButton from "metabase/common/components/ActionButton";
 import Button from "metabase/common/components/Button";
+import DebouncedFrame from "metabase/common/components/DebouncedFrame";
+import EditBar from "metabase/common/components/EditBar";
+import { LeaveConfirmModal } from "metabase/common/components/LeaveConfirmModal";
 import { useToggle } from "metabase/common/hooks/use-toggle";
-import ActionButton from "metabase/components/ActionButton";
-import DebouncedFrame from "metabase/components/DebouncedFrame";
-import EditBar from "metabase/components/EditBar";
-import { LeaveConfirmModal } from "metabase/components/LeaveConfirmModal";
 import ButtonsS from "metabase/css/components/buttons.module.css";
 import CS from "metabase/css/core/index.css";
 import { connect } from "metabase/lib/redux";
@@ -247,6 +247,12 @@ const _DatasetEditorInner = (props) => {
 
   const [focusedFieldName, setFocusedFieldName] = useState();
 
+  useMount(() => {
+    if (question.isSaved() && Lib.canRun(question.query(), question.type())) {
+      runQuestionQuery();
+    }
+  });
+
   const focusedFieldIndex = useMemo(() => {
     if (!focusedFieldName) {
       return -1;
@@ -320,8 +326,8 @@ const _DatasetEditorInner = (props) => {
   const handleCancelEdit = () => {
     closeModal();
     cancelQuestionChanges();
-    runDirtyQuestionQuery();
     setQueryBuilderMode("view");
+    runDirtyQuestionQuery();
   };
 
   const handleCancelClick = () => {

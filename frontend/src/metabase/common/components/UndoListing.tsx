@@ -125,7 +125,7 @@ function UndoToast({
           {undo.icon && (
             <CardIcon
               name={undo.icon}
-              color="var(--mb-color-text-secondary-inverse)"
+              color={undo.iconColor ?? "var(--mb-color-text-secondary-inverse)"}
             />
           )}
           <Ellipsified showTooltip={false}>{renderMessage(undo)}</Ellipsified>
@@ -170,7 +170,12 @@ document.body.appendChild(target);
 
 // The react transition group state transitions are flaky in cypress
 // so disable them for altogether.
-const Group = "Cypress" in window ? Fragment : TransitionGroup;
+const Group = "Cypress" in window ? MockGroup : TransitionGroup;
+
+function MockGroup({ children }: { children: ReactNode }) {
+  return <Fragment>{children}</Fragment>;
+}
+
 const Item =
   "Cypress" in window
     ? function MockItem({

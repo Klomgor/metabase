@@ -3,6 +3,7 @@ import dayjs from "dayjs";
 const { H } = cy;
 import {
   SAMPLE_DB_ID,
+  SAMPLE_DB_SCHEMA_ID,
   USER_GROUPS,
   WRITABLE_DB_ID,
 } from "e2e/support/cypress_data";
@@ -895,7 +896,9 @@ describe("issue 19494", () => {
   }
 
   function checkAppliedFilter(name, value) {
-    cy.findByText(name).closest("fieldset").contains(value);
+    cy.findByText(name, { exact: false })
+      .closest('[data-testid="parameter-widget"]')
+      .contains(value);
   }
 
   beforeEach(() => {
@@ -1158,10 +1161,12 @@ describe("issue 21528", () => {
     H.popover().findByText("Admin settings").click();
     H.appBar().findByText("Table Metadata").click();
     cy.findByRole("main")
-      .findByText(
-        "Select any table to see its schema and add or edit metadata.",
-      )
+      .findByText("Start by selecting data to model")
       .should("be.visible");
+    cy.location("pathname").should(
+      "eq",
+      `/admin/datamodel/database/${SAMPLE_DB_ID}/schema/${SAMPLE_DB_SCHEMA_ID}`,
+    );
     cy.findByTestId("admin-navbar").findByText("Exit admin").click();
 
     H.openNavigationSidebar();
@@ -3549,6 +3554,12 @@ describe("issue 44790", () => {
 });
 
 describe("issue 34955", () => {
+  function checkAppliedFilter(name, value) {
+    cy.contains('[data-testid="parameter-widget"]', name, {
+      exact: false,
+    }).contains(value);
+  }
+
   const ccName = "Custom Created At";
 
   const questionDetails = {
@@ -3624,29 +3635,21 @@ describe("issue 34955", () => {
     });
   });
 
-  it("should connect specific date filter (`Between`) to the temporal custom column (metabase#34955-1)", () => {
+  it("should connect specific date filter (`Between`) to the temporal custom column (metabase#34955)", () => {
     cy.get("@dashboardId").then((dashboard_id) => {
       // Apply filter through URL to prevent the typing flakes
       cy.visit(`/dashboard/${dashboard_id}?on=&between=2024-01-01~2024-03-01`);
-      // eslint-disable-next-line no-unsafe-element-filtering
-      cy.findAllByTestId("field-set-content")
-        .last()
-        .should("contain", "January 1, 2024 - March 1, 2024");
+      checkAppliedFilter("Between", "January 1, 2024 - March 1, 2024");
 
       cy.findAllByTestId("cell-data")
         .filter(":contains(January 1, 2024, 7:26 AM)")
         .should("have.length", 2);
     });
-  });
 
-  // TODO: Once the issue is fixed, merge into a single repro to avoid unnecessary overhead!
-  it.skip("should connect specific date filter (`On`) to the temporal custom column (metabase#34955-2)", () => {
     cy.get("@dashboardId").then((dashboard_id) => {
       // Apply filter through URL to prevent the typing flakes
       cy.visit(`/dashboard/${dashboard_id}?on=2024-01-01&between=`);
-      cy.findAllByTestId("field-set-content")
-        .first()
-        .should("contain", "January 1, 2024");
+      checkAppliedFilter("On", "January 1, 2024");
 
       cy.findAllByTestId("cell-data")
         .filter(":contains(January 1, 2024, 7:26 AM)")
@@ -4471,7 +4474,7 @@ describe("issue 55678", () => {
     });
     H.popover().findByText("See this Order").click();
     H.queryBuilderFiltersPanel()
-      .findByText("Created At is Apr 1–30, 2022")
+      .findByText("Created At: Month is Apr 1–30, 2022")
       .should("be.visible");
     H.assertQueryBuilderRowCount(1);
   });
@@ -4774,6 +4777,58 @@ describe.skip("issue 47951", () => {
     H.popover().within(() => {
       cy.findByText("Rustic Paper Wallet").should("be.visible");
       cy.findByText("Aerodynamic Bronze Hat").should("be.visible");
+    });
+  });
+});
+
+describe("issue 59306", () => {
+  beforeEach(() => {
+    H.restore();
+    cy.signInAsAdmin();
+
+    const parameter = createMockParameter({
+      id: "p1",
+      slug: "p1",
+      type: "string/=",
+      sectionId: "string",
+      default: undefined,
+      values_query_type: "none",
+    });
+
+    H.createDashboardWithQuestions({
+      dashboardDetails: {
+        parameters: [parameter],
+      },
+      questions: [{ name: "q1", query: { "source-table": PRODUCTS_ID } }],
+    }).then(({ dashboard, questions: [card] }) => {
+      H.updateDashboardCards({
+        dashboard_id: dashboard.id,
+        cards: [
+          {
+            card_id: card.id,
+            parameter_mappings: [
+              {
+                card_id: card.id,
+                parameter_id: parameter.id,
+                target: ["dimension", ["field", PRODUCTS.CATEGORY, null]],
+                has_field_values: "input",
+              },
+            ],
+          },
+        ],
+      }).then(() => {
+        H.visitDashboard(dashboard.id);
+      });
+    });
+  });
+
+  it("should not overflow the filter box (metabase#59306)", () => {
+    H.filterWidget().click();
+    H.popover().within(() => {
+      cy.findByPlaceholderText("Enter some text")
+        .type("asdf".repeat(20))
+        .invoke("outerWidth")
+        .should("be.lt", 400);
     });
   });
 });
